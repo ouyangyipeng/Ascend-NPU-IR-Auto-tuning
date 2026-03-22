@@ -1,0 +1,24 @@
+# Build directories
+ascendnpu-ir/build/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+
+# Plans directory (internal use)
+plans/
+
+# ascendnpu-ir is a separate git repo, exclude it
+ascendnpu-ir/
