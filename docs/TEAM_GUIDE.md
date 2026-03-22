@@ -352,10 +352,280 @@ cmake -DCMAKE_BUILD_TYPE=Debug ..
 
 ---
 
-## 十、联系方式与资源
+## 十、组员环境搭建与测试指南
+
+> 本节详细说明组员如何从GitHub仓库克隆代码并在昇腾NPU环境中运行测试。
+
+### 10.1 环境要求
+
+**硬件要求**：
+- CPU：鲲鹏920 ARM（或x86_64也可编译，但无法运行NPU测试）
+- NPU：昇腾A2/A3
+- 内存：至少32GB（编译需要）
+- 磁盘：至少100GB可用空间
+
+**软件要求**：
+- 操作系统：openEuler 22.03 或 Ubuntu 22.04+
+- CMake >= 3.28.0
+- Ninja >= 1.12.0 或 Make
+- Clang >= 10 或 GCC >= 9
+- Python >= 3.8
+- Git >= 2.20
+
+### 10.2 安装CANN包
+
+**必须先安装CANN包**，否则编译会失败。
+
+```bash
+# 1. 下载CANN社区版
+# 访问：https://www.hiascend.com/developer/download/community/result?module=cann
+# 选择对应版本（推荐9.0.0），下载ascend-toolkit
+
+# 2. 解压并安装
+chmod +x Ascend-cann-toolkit_9.0.0_linux-aarch64.run
+./Ascend-cann-toolkit_9.0.0_linux-aarch64.run --install
+
+# 3. 设置环境变量（每次编译前需要执行）
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+# 验证安装
+npu-smi info
+```
+
+### 10.3 克隆代码仓库
+
+```bash
+# 1. 创建工作目录
+mkdir -p ~/compiler-competition && cd ~/compiler-competition
+
+# 2. 克隆我们的GitHub仓库
+git clone https://github.com/ouyangyipeng/Ascend-NPU-IR-Auto-tuning.git
+cd Ascend-NPU-IR-Auto-tuning
+
+# 3. 查看仓库结构
+ls -la
+# 应该看到：README.md, PROGRESS.md, apply_patches.sh, patches/, docs/
+
+# 4. 克隆AscendNPU_IR官方仓库（这是子模块，需要单独克隆）
+git clone https://gitcode.com/Ascend/ascendnpu-ir.git
+cd ascendnpu-ir
+
+# 5. 初始化子模块（LLVM和torch-mlir）
+git submodule update --init --recursive
+# 这一步需要较长时间，LLVM仓库约2GB
+
+# 6. 返回项目根目录
+cd ..
+```
+
+### 10.4 应用我们的优化补丁
+
+```bash
+# 确保在项目根目录
+cd ~/compiler-competition/Ascend-NPU-IR-Auto-tuning
+
+# 给脚本添加执行权限
+chmod +x apply_patches.sh
+
+# 运行补丁脚本
+./apply_patches.sh ./ascendnpu-ir
+
+# 验证补丁应用成功
+ls -la ascendnpu-ir/bishengir/lib/Dialect/HFusion/Transforms/OptimizedAutoSchedule.cpp
+# 应该显示文件存在
+```
+
+### 10.5 安装编译工具
+
+```bash
+# 检查CMake版本
+cmake --version
+# 如果版本低于3.28，需要升级
+
+# 升级CMake（如果需要）
+pip3 install cmake --upgrade
+# 或者
+# wget https://github.com/Kitware/CMake/releases/download/v3.28.0/cmake-3.28.0-linux-aarch64.sh
+# chmod +x cmake-3.28.0-linux-aarch64.sh
+# ./cmake-3.28.0-linux-aarch64.sh --prefix=/usr/local
+
+# 检查Ninja版本
+ninja --version
+# 如果版本低于1.12，需要升级
+
+# 升级Ninja（如果需要）
+pip3 install ninja --upgrade
+```
+
+### 10.6 编译项目
+
+```bash
+# 1. 进入ascendnpu-ir目录
+cd ~/compiler-competition/Ascend-NPU-IR-Auto-tuning/ascendnpu-ir
+
+# 2. 设置CANN环境变量（重要！）
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+# 3. 首次编译（应用补丁）
+./build-tools/build.sh -o ./build --build-type Release --apply-patches
+
+# 编译时间约2-4小时，请耐心等待
+# 编译成功后会显示：
+# "Build finished successfully!"
+
+# 4. 后续增量编译（如果修改了代码）
+./build-tools/build.sh -o ./build --build-type Release
+```
+
+### 10.7 验证编译结果
+
+```bash
+# 1. 检查生成的工具
+cd ~/compiler-competition/Ascend-NPU-IR-Auto-tuning/ascendnpu-ir/build
+
+ls -la bin/
+# 应该看到：
+# bishengir-opt      - Pass测试工具
+# bishengir-compile  - 端到端编译器
+
+# 2. 验证我们的Pass已注册
+./bin/bishengir-opt --help | grep optimized-auto-schedule
+# 应该显示：
+#   --optimized-auto-schedule    : Optimized auto schedule pass with cost model
+
+# 3. 检查Pass选项
+./bin/bishengir-opt --help | grep -A 10 "optimized-auto-schedule"
+```
+
+### 10.8 运行测试
+
+```bash
+# 1. 进入构建目录
+cd ~/compiler-competition/Ascend-NPU-IR-Auto-tuning/ascendnpu-ir/build
+
+# 2. 运行所有测试
+ctest --output-on-failure
+
+# 3. 运行特定测试
+ctest -R auto-schedule --output-on-failure
+
+# 4. 查看测试统计
+ctest -N  # 列出所有测试
+ctest --print-labels  # 显示测试标签
+
+# 5. 运行BiShengIR相关测试
+ctest -L bishengir --output-on-failure
+```
+
+### 10.9 测试单个IR文件
+
+```bash
+# 1. 进入构建目录
+cd ~/compiler-competition/Ascend-NPU-IR-Auto-tuning/ascendnpu-ir/build
+
+# 2. 使用bishengir-opt测试
+./bin/bishengir-opt --optimized-auto-schedule \
+    ../bishengir/test/Dialect/HFusion/xxx.mlir
+
+# 3. 查看Pass帮助
+./bin/bishengir-opt --help | grep -A 20 "optimized-auto-schedule"
+```
+
+### 10.10 常见问题排查
+
+**问题1：CMake版本太低**
+```bash
+# 解决方案
+pip3 install cmake --upgrade --user
+export PATH=$HOME/.local/bin:$PATH
+cmake --version
+```
+
+**问题2：找不到CANN**
+```bash
+# 解决方案：设置环境变量
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+# 添加到~/.bashrc以便自动加载
+echo "source /usr/local/Ascend/ascend-toolkit/set_env.sh" >> ~/.bashrc
+```
+
+**问题3：编译内存不足**
+```bash
+# 解决方案：减少并行编译数
+./build-tools/build.sh -o ./build --build-type Release --apply-patches -j 4
+# 将-j后面的数字改为CPU核心数的一半
+```
+
+**问题4：子模块克隆失败**
+```bash
+# 解决方案：手动克隆
+cd ascendnpu-ir
+git submodule deinit -f .
+rm -rf .git/modules/*
+git submodule update --init --recursive
+```
+
+**问题5：补丁应用失败**
+```bash
+# 解决方案：检查文件是否存在
+ls -la patches/
+# 确保所有补丁文件都存在
+
+# 手动应用补丁
+cp patches/OptimizedAutoSchedule.cpp ascendnpu-ir/bishengir/lib/Dialect/HFusion/Transforms/
+cp patches/AnyPBRSchedule.cpp ascendnpu-ir/bishengir/lib/Dialect/HFusion/Transforms/AutoSchedule/
+cp patches/Passes.td ascendnpu-ir/bishengir/include/bishengir/Dialect/HFusion/Transforms/
+cp patches/Passes.h ascendnpu-ir/bishengir/include/bishengir/Dialect/HFusion/Transforms/
+cp patches/CMakeLists.txt ascendnpu-ir/bishengir/lib/Dialect/HFusion/Transforms/
+```
+
+### 10.11 完整流程总结
+
+```bash
+# === 一键脚本 ===
+# 将以下内容保存为 setup.sh
+
+#!/bin/bash
+set -e
+
+echo "=== 1. 设置环境变量 ==="
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+echo "=== 2. 克隆代码 ==="
+mkdir -p ~/compiler-competition && cd ~/compiler-competition
+git clone https://github.com/ouyangyipeng/Ascend-NPU-IR-Auto-tuning.git
+cd Ascend-NPU-IR-Auto-tuning
+git clone https://gitcode.com/Ascend/ascendnpu-ir.git
+cd ascendnpu-ir
+git submodule update --init --recursive
+
+echo "=== 3. 应用补丁 ==="
+cd ..
+chmod +x apply_patches.sh
+./apply_patches.sh ./ascendnpu-ir
+
+echo "=== 4. 编译 ==="
+cd ascendnpu-ir
+./build-tools/build.sh -o ./build --build-type Release --apply-patches
+
+echo "=== 5. 验证 ==="
+cd build
+./bin/bishengir-opt --help | grep optimized-auto-schedule
+
+echo "=== 6. 测试 ==="
+ctest --output-on-failure
+
+echo "=== 完成！ ==="
+```
+
+---
+
+## 十一、联系方式与资源
 
 - **大赛官网**：https://compiler.educg.net
 - **AscendNPU_IR仓库**：https://gitcode.com/Ascend/ascendnpu-ir
+- **我们的GitHub仓库**：https://github.com/ouyangyipeng/Ascend-NPU-IR-Auto-tuning
 - **用户指南**：https://www.hiascend.com/document/detail/zh/canncommercial/82RC1/opdevg/AscendNPUIR/ir_001.html
 
 ---
